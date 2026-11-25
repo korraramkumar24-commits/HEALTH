@@ -1,0 +1,363 @@
+{
+  "info": {
+    "name": "Health Monitoring API",
+    "description": "Health-record authorization, range validation, history, and summary checks. Set collection variables before running.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000/api" },
+    { "key": "patientToken", "value": "" },
+    { "key": "doctorToken", "value": "" },
+    { "key": "adminToken", "value": "" },
+    { "key": "patientId", "value": "" },
+    { "key": "otherPatientId", "value": "" },
+    { "key": "recordId", "value": "" },
+    { "key": "criticalAlertId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Create reading as the signed-in patient",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"systolic\": 120,\n  \"diastolic\": 80,\n  \"bloodSugar\": 100,\n  \"heartRate\": 72,\n  \"weight\": 68,\n  \"oxygenLevel\": 98,\n  \"recordedAt\": \"{{$isoTimestamp}}\",\n  \"notes\": \"Postman test reading\"\n}"
+        },
+        "url": "{{baseUrl}}/health-records",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{patientToken}}", "type": "string" }]
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('Reading is created', () => pm.response.to.have.status(201));",
+            "const data = pm.response.json().data.record;",
+            "pm.test('Patient ownership is derived from the signed-in account', () => pm.expect(String(data.patientId)).to.eql(pm.collectionVariables.get('patientId')));",
+            "pm.collectionVariables.set('recordId', data._id);"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Reject out-of-range measurements",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"systolic\": 251,\n  \"diastolic\": 151,\n  \"bloodSugar\": 801,\n  \"heartRate\": 251,\n  \"weight\": 501,\n  \"oxygenLevel\": 101\n}"
+        },
+        "url": "{{baseUrl}}/health-records",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{patientToken}}", "type": "string" }]
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('Out-of-range values return 400', () => pm.response.to.have.status(400));",
+            "const errors = pm.response.json().errors;",
+            "pm.test('Each invalid measurement is identified', () => ['systolic', 'diastolic', 'bloodSugar', 'heartRate', 'weight', 'oxygenLevel'].forEach((field) => pm.expect(errors).to.have.property(field)));"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Reject a future recordedAt date",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"heartRate\": 70,\n  \"recordedAt\": \"2099-01-01T00:00:00.000Z\"\n}" },
+        "url": "{{baseUrl}}/health-records",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{patientToken}}", "type": "string" }]
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('Future reading date returns 400', () => pm.response.to.have.status(400));",
+            "pm.test('Response identifies recordedAt', () => pm.expect(pm.response.json().errors).to.have.property('recordedAt'));"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Reject patient trying to post for another patient",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"patientId\": \"{{otherPatientId}}\",\n  \"heartRate\": 70\n}"
+        },
+        "url": "{{baseUrl}}/health-records",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{patientToken}}", "type": "string" }]
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('Forged patientId is rejected', () => pm.response.to.have.status(400));",
+            "pm.test('Response explains patientId is server-assigned', () => pm.expect(pm.response.json().errors).to.have.property('patientId'));"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Reject systolic less than diastolic",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"systolic\": 80,\n  \"diastolic\": 90\n}" },
+        "url": "{{baseUrl}}/health-records",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{patientToken}}", "type": "string" }]
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('Invalid pressure relationship returns 400', () => pm.response.to.have.status(400));",
+            "pm.test('Response identifies systolic', () => pm.expect(pm.response.json().errors).to.have.property('systolic'));"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "List own history",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health-records?page=1&limit=10",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{patientToken}}", "type": "string" }]
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('History request succeeds', () => pm.response.to.have.status(200));",
+            "const data = pm.response.json().data;",
+            "pm.test('Pagination metadata is returned', () => { pm.expect(data).to.have.property('totalRecords'); pm.expect(data).to.have.property('totalPages'); });",
+            "pm.test('Patient receives only own records', () => data.records.forEach((record) => pm.expect(String(record.patientId)).to.eql(pm.collectionVariables.get('patientId'))));"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Doctor cannot read an unassigned patient's latest reading",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health-records/latest/{{otherPatientId}}",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{doctorToken}}", "type": "string" }]
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('Unassigned patient access is forbidden', () => pm.response.to.have.status(403));"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Read seven-day summary",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health-records/summary/{{patientId}}?days=7",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{patientToken}}", "type": "string" }]
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('Summary request succeeds', () => pm.response.to.have.status(200));",
+            "const summary = pm.response.json().data.summary;",
+            "pm.test('Summary includes statistics and trend per measure', () => { pm.expect(summary.systolic).to.have.all.keys('min', 'max', 'average', 'count', 'trend'); pm.expect(['improving', 'stable', 'needs review']).to.include(summary.systolic.trend); });"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Read a specific reading",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health-records/{{recordId}}",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{patientToken}}", "type": "string" }]
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('Owner can read the record', () => pm.response.to.have.status(200));",
+            "pm.test('Record belongs to the configured patient', () => pm.expect(String(pm.response.json().data.record.patientId)).to.eql(pm.collectionVariables.get('patientId')));"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Update a reading within 24 hours",
+      "request": {
+        "method": "PUT",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"notes\": \"Updated by Postman\"\n}" },
+        "url": "{{baseUrl}}/health-records/{{recordId}}",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{patientToken}}", "type": "string" }]
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('Owner can update a recent reading', () => pm.response.to.have.status(200));",
+            "pm.test('Update preserves measurements', () => pm.expect(pm.response.json().data.record.systolic).to.eql(120));"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Read latest own reading",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health-records/latest/{{patientId}}",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{patientToken}}", "type": "string" }]
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('Owner can read the latest reading', () => pm.response.to.have.status(200));",
+            "pm.test('Latest reading is present', () => pm.expect(pm.response.json().data.record).to.not.eql(null));"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Admin can delete a reading",
+      "request": {
+        "method": "DELETE",
+        "url": "{{baseUrl}}/health-records/{{recordId}}",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('Admin can delete a record', () => pm.response.to.have.status(200));"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Phase 7 - Patient posts high reading (creates a critical demo alert)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"systolic\": 180,\n  \"recordedAt\": \"{{$isoTimestamp}}\",\n  \"notes\": \"Demo threshold notification test\"\n}" },
+        "url": "{{baseUrl}}/health-records",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{patientToken}}", "type": "string" }]
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('High reading is saved', () => pm.response.to.have.status(201));"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Phase 7 - Assigned doctor sees the critical alert",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/alerts?severity=critical&status=unread&patientId={{patientId}}",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{doctorToken}}", "type": "string" }]
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('Assigned doctor can read critical alerts', () => pm.response.to.have.status(200));",
+            "const alert = pm.response.json().data.alerts.find((item) => item.type === 'systolic' && item.severity === 'critical' && item.message.includes('outside demo range'));",
+            "pm.test('High reading created a neutral critical review alert', () => pm.expect(alert).to.be.an('object'));",
+            "if (alert) pm.collectionVariables.set('criticalAlertId', alert._id);"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Phase 7 - Assigned doctor receives a notification",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/notifications?page=1&limit=50",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{doctorToken}}", "type": "string" }]
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('Doctor notifications are available', () => pm.response.to.have.status(200));",
+            "const notifications = pm.response.json().data.notifications;",
+            "pm.test('Notification references the generated alert', () => pm.expect(notifications.some((item) => String(item.alertId?._id) === pm.collectionVariables.get('criticalAlertId'))).to.eql(true));"
+          ]
+        }
+      }]
+    }
+  ]
+}

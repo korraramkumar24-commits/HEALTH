@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: carehub-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY_HOPS
+        value: 1
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: SEED_DEMO_DATA
+        value: "false"
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CLIENT_URL
+        sync: false
